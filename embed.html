@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>YouTube @ 2x (user-initiated)</title>
+    <style>
+      html, body { height: 100%; margin: 0; }
+      body { display: grid; place-items: center; background: #0b0b0f; }
+      #player-wrap { width: min(960px, 95vw); aspect-ratio: 16 / 9; }
+      #player { width: 100%; height: 100%; }
+      .note {
+        color: #c9c9d1;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+        font-size: 14px;
+        margin-top: 10px;
+        opacity: 0.85;
+        text-align: center;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div>
+      <div id="player-wrap">
+        <div id="player"></div>
+      </div>
+      <div class="note">Plays with sound. Speed is forced to 2× when you press play.</div>
+    </div>
+
+    <script>
+      // --- Config ---
+      const VIDEO_ID = "pYLxtEYevp8";
+      const TARGET_RATE = 2;
+
+      // Load the YouTube IFrame Player API
+      (function loadYT() {
+        const tag = document.createElement("script");
+        tag.src = "https://www.youtube.com/iframe_api";
+        document.head.appendChild(tag);
+      })();
+
+      let player;
+      let lastState = -1;
+
+      // Called automatically by the YT API once it's ready
+      function onYouTubeIframeAPIReady() {
+        player = new YT.Player("player", {
+          videoId: VIDEO_ID,
+          width: "100%",
+          height: "100%",
+          playerVars: {
+            autoplay: 0,      // do NOT autoplay
+            controls: 1,
+            rel: 0,
+            playsinline: 1,
+            // modestbranding is deprecated-ish but harmless if ignored
+            modestbranding: 1
+          },
+          events: {
+            onReady: onPlayerReady,
+            onStateChange: onPlayerStateChange
+          }
+        });
+      }
+
+      function onPlayerReady() {
+        // Ensure we never start muted (you want sound)
+        // (Muted state is generally only relevant for autoplay.)
+        try { player.unMute(); } catch (_) {}
+      }
+
+      function forceRate() {
+        // Some browsers/embeds may momentarily reset rate when playback begins,
+        // so we set it a couple times.
+        try {
+          const rates = player.getAvailablePlaybackRates?.() || [];
+          if (rates.length && !rates.includes(TARGET_RATE)) {
+            // If 2x isn't available for some reason, pick the highest available.
+            player.setPlaybackRate(rates[rates.length - 1]);
+            return;
+          }
+          player.setPlaybackRate(TARGET_RATE);
+        } catch (_) {}
+      }
+
+      function onPlayerStateChange(event) {
+        const state = event.data;
+
+        // When the user presses Play, the player transitions into PLAYING.
+        // Force 2x at that moment (and again shortly after, to be safe).
+        if (state === YT.PlayerState.PLAYING && lastState !== YT.PlayerState.PLAYING) {
+          forceRate();
+          setTimeout(forceRate, 250);
+          setTimeout(forceRate, 1000);
+        }
+
+        lastState = state;
+      }
+    </script>
+  </body>
+</html>

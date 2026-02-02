@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>YouTube 2x (no autoplay, cover)</title>
+    <title>YouTube 2x (no autoplay, controllable crop)</title>
     <style>
       html, body {
         width: 100%;
@@ -14,7 +14,7 @@
         overflow: hidden;
       }
 
-      /* Full-bleed stage that clips overflow (cropping) */
+      /* Clip anything outside the embed frame */
       #stage {
         position: fixed;
         inset: 0;
@@ -22,7 +22,6 @@
         background: transparent;
       }
 
-      /* YT iframe will be positioned/sized by JS to "cover" */
       #player iframe {
         position: absolute;
         border: 0;
@@ -32,20 +31,31 @@
   </head>
 
   <body>
-    <div id="stage">
-      <div id="player"></div>
-    </div>
+    <div id="stage"><div id="player"></div></div>
 
     <script>
       const VIDEO_ID = "pYLxtEYevp8";
       const TARGET_RATE = 2;
 
-      // Optional: tweak crop without redeploying, e.g. ?zoom=1.25
+      // --- Tuning via URL params (so you can tweak without redeploying) ---
+      // Examples:
+      //   ?ar=16:9&zoom=1.25&x=0&y=-10
+      //   ?ar=4:3&zoom=1.18
+      //   ?ar=9:16&zoom=1.35
       const params = new URLSearchParams(location.search);
-      const ZOOM = Number(params.get("zoom")) || 1.18; // increase if borders still show
 
-      // YouTube videos are effectively 16:9 for sizing purposes
-      const VIDEO_RATIO = 16 / 9;
+      function parseAR(str) {
+        if (!str) return 16 / 9;
+        const m = String(str).trim().match(/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/);
+        if (!m) return 16 / 9;
+        const w = Number(m[1]), h = Number(m[2]);
+        return (w > 0 && h > 0) ? (w / h) : (16 / 9);
+      }
+
+      const VIDEO_RATIO = parseAR(params.get("ar"));      // assumed content ratio
+      const ZOOM = Number(params.get("zoom")) || 1.20;    // zoom in to remove matte
+      const PAN_X = Number(params.get("x")) || 0;         // -100..100 (percent of extra crop)
+      const PAN_Y = Number(params.get("y")) || 0;         // -100..100 (percent of extra crop)
 
       // Load the YouTube IFrame Player API
       (function loadYT() {
@@ -58,33 +68,46 @@
       let lastState = -1;
       let iframeEl = null;
 
+      function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
+
       function sizeIframeToCover() {
         if (!iframeEl) return;
 
         const stage = document.getElementById("stage");
-        const w = stage.clientWidth;
-        const h = stage.clientHeight;
-        const containerRatio = w / h;
+        const W = stage.clientWidth;
+        const H = stage.clientHeight;
 
+        const containerRatio = W / H;
+
+        // Cover sizing based on assumed VIDEO_RATIO
         let iw, ih;
-
-        // "Cover" logic: make iframe big enough to cover stage in both dimensions
         if (containerRatio > VIDEO_RATIO) {
-          iw = w;
-          ih = w / VIDEO_RATIO;
+          iw = W;
+          ih = W / VIDEO_RATIO;
         } else {
-          ih = h;
-          iw = h * VIDEO_RATIO;
+          ih = H;
+          iw = H * VIDEO_RATIO;
         }
 
-        // Overscan zoom to crop away baked-in borders
+        // Zoom to crop out baked-in borders (matte)
         iw *= ZOOM;
         ih *= ZOOM;
 
+        // Compute leftover crop area
+        const extraX = iw - W;
+        const extraY = ih - H;
+
+        // Pan as a % of extra crop area: -100 (left/top) to +100 (right/bottom)
+        const px = clamp(PAN_X, -100, 100) / 200; // -0.5..0.5
+        const py = clamp(PAN_Y, -100, 100) / 200;
+
+        const left = -extraX / 2 + (extraX * px);
+        const top  = -extraY / 2 + (extraY * py);
+
         iframeEl.style.width = `${iw}px`;
         iframeEl.style.height = `${ih}px`;
-        iframeEl.style.left = `${(w - iw) / 2}px`;
-        iframeEl.style.top = `${(h - ih) / 2}px`;
+        iframeEl.style.left = `${left}px`;
+        iframeEl.style.top = `${top}px`;
       }
 
       function forceRate() {
@@ -98,37 +121,29 @@
         } catch (_) {}
       }
 
-      // Called automatically by the YT API once it's ready
       function onYouTubeIframeAPIReady() {
         player = new YT.Player("player", {
           videoId: VIDEO_ID,
           playerVars: {
-            autoplay: 0,      // no autoplay
+            autoplay: 0,   // no autoplay
             controls: 1,
             rel: 0,
             playsinline: 1
           },
           events: {
             onReady: () => {
-              // Grab the generated iframe and apply cover sizing
               iframeEl = document.querySelector("#player iframe");
               sizeIframeToCover();
               window.addEventListener("resize", sizeIframeToCover);
-
-              // Ensure sound is allowed (autoplay is off anyway)
               try { player.unMute(); } catch (_) {}
             },
             onStateChange: (event) => {
-              const state = event.data;
-
-              // When user presses play -> force 2x (and again shortly after)
-              if (state === YT.PlayerState.PLAYING && lastState !== YT.PlayerState.PLAYING) {
+              if (event.data === YT.PlayerState.PLAYING && lastState !== YT.PlayerState.PLAYING) {
                 forceRate();
                 setTimeout(forceRate, 250);
                 setTimeout(forceRate, 1000);
               }
-
-              lastState = state;
+              lastState = event.data;
             }
           }
         });

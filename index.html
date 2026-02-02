@@ -3,33 +3,42 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>YouTube @ 2x (user-initiated)</title>
+    <title>2x YouTube (no autoplay)</title>
     <style>
-      html, body { height: 100%; margin: 0; }
-      body { display: grid; place-items: center; background: #0b0b0f; }
-      #player-wrap { width: min(960px, 95vw); aspect-ratio: 16 / 9; }
-      #player { width: 100%; height: 100%; }
-      .note {
-        color: #c9c9d1;
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-        font-size: 14px;
-        margin-top: 10px;
-        opacity: 0.85;
-        text-align: center;
+      /* Full-bleed page (important for Notion embeds) */
+      html, body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        background: transparent; /* no black border from your page */
+        overflow: hidden;
+      }
+
+      /* Player fills the entire iframe */
+      #player {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+      }
+
+      /* Ensure the injected YouTube iframe fills too */
+      #player iframe {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        border: 0;
+        display: block;
       }
     </style>
   </head>
 
   <body>
-    <div>
-      <div id="player-wrap">
-        <div id="player"></div>
-      </div>
-      <div class="note">Plays with sound. Speed is forced to 2× when you press play.</div>
-    </div>
+    <div id="player"></div>
 
     <script>
-      // --- Config ---
       const VIDEO_ID = "pYLxtEYevp8";
       const TARGET_RATE = 2;
 
@@ -47,37 +56,23 @@
       function onYouTubeIframeAPIReady() {
         player = new YT.Player("player", {
           videoId: VIDEO_ID,
-          width: "100%",
-          height: "100%",
           playerVars: {
-            autoplay: 0,      // do NOT autoplay
+            autoplay: 0,   // no autoplay
             controls: 1,
             rel: 0,
-            playsinline: 1,
-            // modestbranding is deprecated-ish but harmless if ignored
-            modestbranding: 1
+            playsinline: 1
           },
           events: {
-            onReady: onPlayerReady,
             onStateChange: onPlayerStateChange
           }
         });
       }
 
-      function onPlayerReady() {
-        // Ensure we never start muted (you want sound)
-        // (Muted state is generally only relevant for autoplay.)
-        try { player.unMute(); } catch (_) {}
-      }
-
       function forceRate() {
-        // Some browsers/embeds may momentarily reset rate when playback begins,
-        // so we set it a couple times.
         try {
           const rates = player.getAvailablePlaybackRates?.() || [];
           if (rates.length && !rates.includes(TARGET_RATE)) {
-            // If 2x isn't available for some reason, pick the highest available.
-            player.setPlaybackRate(rates[rates.length - 1]);
+            player.setPlaybackRate(rates[rates.length - 1]); // fallback to highest
             return;
           }
           player.setPlaybackRate(TARGET_RATE);
@@ -87,8 +82,7 @@
       function onPlayerStateChange(event) {
         const state = event.data;
 
-        // When the user presses Play, the player transitions into PLAYING.
-        // Force 2x at that moment (and again shortly after, to be safe).
+        // When user presses play -> force 2x (and again shortly after)
         if (state === YT.PlayerState.PLAYING && lastState !== YT.PlayerState.PLAYING) {
           forceRate();
           setTimeout(forceRate, 250);

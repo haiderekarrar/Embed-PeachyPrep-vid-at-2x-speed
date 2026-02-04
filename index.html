@@ -3,59 +3,35 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>YouTube 2x (no autoplay, controllable crop)</title>
+    <title>YouTube @ 2x (user-initiated)</title>
     <style>
-      html, body {
-        width: 100%;
-        height: 100%;
-        margin: 0;
-        padding: 0;
-        background: transparent;
-        overflow: hidden;
-      }
-
-      /* Clip anything outside the embed frame */
-      #stage {
-        position: fixed;
-        inset: 0;
-        overflow: hidden;
-        background: transparent;
-      }
-
-      #player iframe {
-        position: absolute;
-        border: 0;
-        display: block;
+      html, body { height: 100%; margin: 0; }
+      body { display: grid; place-items: center; background: #0b0b0f; }
+      #player-wrap { width: min(960px, 95vw); aspect-ratio: 16 / 9; }
+      #player { width: 100%; height: 100%; }
+      .note {
+        color: #c9c9d1;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+        font-size: 14px;
+        margin-top: 10px;
+        opacity: 0.85;
+        text-align: center;
       }
     </style>
   </head>
 
   <body>
-    <div id="stage"><div id="player"></div></div>
+    <div>
+      <div id="player-wrap">
+        <div id="player"></div>
+      </div>
+      <div class="note">Plays with sound. Speed is forced to 2× when you press play.</div>
+    </div>
 
     <script>
+      // --- Config ---
       const VIDEO_ID = "pYLxtEYevp8";
       const TARGET_RATE = 2;
-
-      // --- Tuning via URL params (so you can tweak without redeploying) ---
-      // Examples:
-      //   ?ar=16:9&zoom=1.25&x=0&y=-10
-      //   ?ar=4:3&zoom=1.18
-      //   ?ar=9:16&zoom=1.35
-      const params = new URLSearchParams(location.search);
-
-      function parseAR(str) {
-        if (!str) return 16 / 9;
-        const m = String(str).trim().match(/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/);
-        if (!m) return 16 / 9;
-        const w = Number(m[1]), h = Number(m[2]);
-        return (w > 0 && h > 0) ? (w / h) : (16 / 9);
-      }
-
-      const VIDEO_RATIO = parseAR(params.get("ar"));      // assumed content ratio
-      const ZOOM = Number(params.get("zoom")) || 1.20;    // zoom in to remove matte
-      const PAN_X = Number(params.get("x")) || 0;         // -100..100 (percent of extra crop)
-      const PAN_Y = Number(params.get("y")) || 0;         // -100..100 (percent of extra crop)
 
       // Load the YouTube IFrame Player API
       (function loadYT() {
@@ -66,87 +42,60 @@
 
       let player;
       let lastState = -1;
-      let iframeEl = null;
 
-      function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
+      // Called automatically by the YT API once it's ready
+      function onYouTubeIframeAPIReady() {
+        player = new YT.Player("player", {
+          videoId: VIDEO_ID,
+          width: "100%",
+          height: "100%",
+          playerVars: {
+            autoplay: 0,      // do NOT autoplay
+            controls: 1,
+            rel: 0,
+            playsinline: 1,
+            // modestbranding is deprecated-ish but harmless if ignored
+            modestbranding: 1
+          },
+          events: {
+            onReady: onPlayerReady,
+            onStateChange: onPlayerStateChange
+          }
+        });
+      }
 
-      function sizeIframeToCover() {
-        if (!iframeEl) return;
-
-        const stage = document.getElementById("stage");
-        const W = stage.clientWidth;
-        const H = stage.clientHeight;
-
-        const containerRatio = W / H;
-
-        // Cover sizing based on assumed VIDEO_RATIO
-        let iw, ih;
-        if (containerRatio > VIDEO_RATIO) {
-          iw = W;
-          ih = W / VIDEO_RATIO;
-        } else {
-          ih = H;
-          iw = H * VIDEO_RATIO;
-        }
-
-        // Zoom to crop out baked-in borders (matte)
-        iw *= ZOOM;
-        ih *= ZOOM;
-
-        // Compute leftover crop area
-        const extraX = iw - W;
-        const extraY = ih - H;
-
-        // Pan as a % of extra crop area: -100 (left/top) to +100 (right/bottom)
-        const px = clamp(PAN_X, -100, 100) / 200; // -0.5..0.5
-        const py = clamp(PAN_Y, -100, 100) / 200;
-
-        const left = -extraX / 2 + (extraX * px);
-        const top  = -extraY / 2 + (extraY * py);
-
-        iframeEl.style.width = `${iw}px`;
-        iframeEl.style.height = `${ih}px`;
-        iframeEl.style.left = `${left}px`;
-        iframeEl.style.top = `${top}px`;
+      function onPlayerReady() {
+        // Ensure we never start muted (you want sound)
+        // (Muted state is generally only relevant for autoplay.)
+        try { player.unMute(); } catch (_) {}
       }
 
       function forceRate() {
+        // Some browsers/embeds may momentarily reset rate when playback begins,
+        // so we set it a couple times.
         try {
           const rates = player.getAvailablePlaybackRates?.() || [];
           if (rates.length && !rates.includes(TARGET_RATE)) {
-            player.setPlaybackRate(rates[rates.length - 1]); // fallback: max available
+            // If 2x isn't available for some reason, pick the highest available.
+            player.setPlaybackRate(rates[rates.length - 1]);
             return;
           }
           player.setPlaybackRate(TARGET_RATE);
         } catch (_) {}
       }
 
-      function onYouTubeIframeAPIReady() {
-        player = new YT.Player("player", {
-          videoId: VIDEO_ID,
-          playerVars: {
-            autoplay: 0,   // no autoplay
-            controls: 1,
-            rel: 0,
-            playsinline: 1
-          },
-          events: {
-            onReady: () => {
-              iframeEl = document.querySelector("#player iframe");
-              sizeIframeToCover();
-              window.addEventListener("resize", sizeIframeToCover);
-              try { player.unMute(); } catch (_) {}
-            },
-            onStateChange: (event) => {
-              if (event.data === YT.PlayerState.PLAYING && lastState !== YT.PlayerState.PLAYING) {
-                forceRate();
-                setTimeout(forceRate, 250);
-                setTimeout(forceRate, 1000);
-              }
-              lastState = event.data;
-            }
-          }
-        });
+      function onPlayerStateChange(event) {
+        const state = event.data;
+
+        // When the user presses Play, the player transitions into PLAYING.
+        // Force 2x at that moment (and again shortly after, to be safe).
+        if (state === YT.PlayerState.PLAYING && lastState !== YT.PlayerState.PLAYING) {
+          forceRate();
+          setTimeout(forceRate, 250);
+          setTimeout(forceRate, 1000);
+        }
+
+        lastState = state;
       }
     </script>
   </body>
